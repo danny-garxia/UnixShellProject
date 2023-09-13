@@ -6,7 +6,14 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <fcntl.h>
+#include <sys/wait.h> // Include this header for wait and waitpid
 #define MAX_CMD_LINE_ARGS  128
+
+#define MAX_HISTORY_SIZE   10  // Adjust this as needed
+
+char history[MAX_HISTORY_SIZE][BUFSIZ];
+int history_index = 0;
+
 
 int min(int a, int b) { return a < b ? a : b; }
 
@@ -106,38 +113,40 @@ return 0;
 
 int main(int argc, const char * argv[]) {
   char input[BUFSIZ];
-  char last_input[BUFSIZ];  
   bool finished = false;
 
-  memset(last_input, 0, BUFSIZ * sizeof(char));  
   while (!finished) {
     memset(input, 0, BUFSIZ * sizeof(char));
 
     printf("osh > ");
     fflush(stdout);
 
-    if (strlen(input) > 0) {
-      strncpy(last_input, input, min(strlen(input), BUFSIZ));
-      memset(last_input, 0, BUFSIZ * sizeof(char));
-    }
-
-    if ((fgets(input, BUFSIZ, stdin)) == NULL) {   // or gets(input, BUFSIZ);
+    if ((fgets(input, BUFSIZ, stdin)) == NULL) {
       fprintf(stderr, "no command entered\n");
       exit(1);
     }
-    input[strlen(input) - 1] = '\0';          // wipe out newline at end of string
-    // printf("input was: '%s'\n", input);
-    // printf("last_input was: '%s'\n", last_input);
-    if (strncmp(input, "exit", 4) == 0) {   // only compare first 4 letters
+    input[strlen(input) - 1] = '\0';
+
+    if (strncmp(input, "exit", 4) == 0) {
       finished = true;
-    } else if (strncmp(input, "!!", 2) == 0) { // check for history command
-      // TODO:  Not sure if this is the answer
-      execute(last_input);
-      } else { execute(input); }
+    } else if (strncmp(input, "!!", 2) == 0) {
+      if (history_index == 0) {
+        printf("No commands in history.\n");
+      } else {
+        // Retrieve and execute the most recent command from history
+        printf("Executing from history: %s\n", history[history_index - 1]);
+        execute(history[history_index - 1]);
+      }
+    } else {
+      // Store the current input in the history buffer
+      strncpy(history[history_index], input, min(strlen(input), BUFSIZ));
+      history_index = (history_index + 1) % MAX_HISTORY_SIZE;
+
+      // Execute the entered command
+      execute(input);
+    }
   }
-  
+
   printf("\t\t...exiting\n");
   return 0;
 }
-shell-2-1.c
-4 KB
