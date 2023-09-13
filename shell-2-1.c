@@ -4,50 +4,69 @@
 #include <stdbool.h>
 #include <sys/types.h>
 #include <unistd.h>
-
+#include <ctype.h>
+#include <fcntl.h>
 #define MAX_CMD_LINE_ARGS  128
-//look at slides for parse code
+
 int min(int a, int b) { return a < b ? a : b; }
 
+void redirect_input(const char* filename) { 
+    int fd = open (filename, O_RDONLY);
+    if (fd == -1) {  
+        perror("open filename in redirect_input failed");
+        exit(-1);
+    }
+    dup2(fd, STDIN_FILENO);
+}
 
-int parse(char* s, char* argv[]) {
+void redirect_output(const char* filename, bool append) { 
+    int flags = O_WRONLY;
+    flags |= append ? O_APPEND : O_CREAT;
+
+    int fd = open (filename, flags);
+    if (fd == -1) { 
+        perror("open failure in redirect_output");
+        exit(-2);
+    }
+    dup2(fd, STDOUT_FILENO);
+}
+// break a string into its tokens, putting a \0 between each token
+//   save the beginning of each string in a string of char *'s (ptrs to chars)
+
+int parse(char* p, char* argv[]) {
   char* filename;
   char in_or_out;
-  while (*s != '\0'){
-    while (isspace(*s)){
-      *s++ = '\0';
-    }
-    if (*s =='<'){
-      in_or_out = *s;
-      while (isspace(*s)){
-        ++s;
-      }
-      filename = s;
-      while (!isspace(*s)){
-        ++s;
-      }
-      redirect_input(filename);
-    }
+  bool append = false;
+  int argc = 0;
 
+  while (*p != '\0') { 
+      while (*p != '\0' && isspace(*p)) { 
+          *p++ = '\0';
+      }
+      if (*p == '<' || *p == '>') { 
+          in_or_out = *p++;
+          if (*p == '>') {++p; append = true; }   // >> means append to file
+          while (*p != '\0' && isspace(*p)) {
+              ++p;
+          }
+          filename = p;
+          while (*p != '\0' && !isspace(*p)) { 
+              ++p;
+          }
+          *p++ = '\0';
+          in_or_out == '<' ? redirect_input(filename) : redirect_output(filename, append);
+          continue; 
+      }
+      *argv++ = p;
+      ++argc;
+      while (*p != '\0' && !isspace(*p)) { 
+        ++p; 
+      }
   }
-  int c = 0;
-  while (*s != '\0') {
-    while (isspace(*s)) {       // skip leading whitespace
-      ++s;
-    }
-    if (*s != '\0') {           // found a token
-      argv[c++] = s;            // save ptr to beginning of token
-    }
-    while (!isspace(*s) && (*s != '\0')) {  // scan token until whitespace or end
-      ++s;
-    }
-    if (*s != '\0') {           // end of token?  put a \0, and keep going
-      *s = '\0';
-      ++s;
-    }
-  } 
-  return c;   // int argc
+  *argv = NULL;
+  return argc;
 }
+
 
 // execute a single shell command, with its command line arguments
 //     the shell command should start with the name of the command
@@ -72,15 +91,17 @@ int execute(char* input) {
   if (pid < 0) { fprintf(stderr, "Fork() failed\n"); }  // send to stderr
   else if (pid == 0) { // child
     int ret = 0;
-    // if ((ret = execlp("cal", "cal", NULL)) < 0) {  // can do it arg by arg, ending in NULL
-		// TODO: fill in code for execvp(...)
-		printf("You should have called execvp(...)\n");
+    if ((ret = execvp(shell_argv[0], shell_argv)) < 0) {  // can do it arg by arg, ending in NULL
+      exit(1);
+    }
+    exit(0);
   }
   else { // parent -----  don't wait if you are creating a daemon (background) process
     while (wait(&status) != pid) { }
   }
-  
-  return 0;
+
+
+return 0;
 }
 
 int main(int argc, const char * argv[]) {
@@ -110,10 +131,13 @@ int main(int argc, const char * argv[]) {
     if (strncmp(input, "exit", 4) == 0) {   // only compare first 4 letters
       finished = true;
     } else if (strncmp(input, "!!", 2) == 0) { // check for history command
-      // TODO
-    } else { execute(input); }
+      // TODO:  Not sure if this is the answer
+      execute(last_input);
+      } else { execute(input); }
   }
   
   printf("\t\t...exiting\n");
   return 0;
 }
+shell-2-1.c
+4 KB
