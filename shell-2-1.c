@@ -47,6 +47,7 @@ int parse(char* p, char* argv[]) {
     char* filename;
     char in_or_out;
     bool append = false;
+    bool is_pipe = false; // Flag to indicate if a pipe is encountered
     int argc = 0;
 
     while (*p != '\0') {
@@ -70,6 +71,11 @@ int parse(char* p, char* argv[]) {
             in_or_out == '<' ? redirect_input(filename) : redirect_output(filename, append);
             continue;
         }
+        if (*p == '|') {
+            is_pipe = true;
+            *p++ = '\0';
+            break;
+        }
         *argv++ = p;
         ++argc;
         while (*p != '\0' && !isspace(*p)) {
@@ -77,44 +83,90 @@ int parse(char* p, char* argv[]) {
         }
     }
     *argv = NULL;
-    return argc;
+    return is_pipe ? -argc : argc; // Return a negative value to indicate a pipe
 }
-
 
 // execute a single shell command, with its command line arguments
 //     the shell command should start with the name of the command
 int execute(char* input) {
-  int i = 0;
-  char* shell_argv[MAX_CMD_LINE_ARGS];
-  memset(shell_argv, 0, MAX_CMD_LINE_ARGS * sizeof(char));
+    int i = 0;
+    char* shell_argv[MAX_CMD_LINE_ARGS];
+    memset(shell_argv, 0, MAX_CMD_LINE_ARGS * sizeof(char));
 
-  
-  int shell_argc = parse(input, shell_argv);
-  // printf("after parse, what is input: %s\n", input);      // check parser
-  // printf("argc is: %d\n", shell_argc);
-  // while (shell_argc > 0) {
-  //   printf("argc: %d: %s\n", i, shell_argv[i]);
-  //   --shell_argc;
-  //   ++i;
-  // }
-  
-  int status = 0;
-  pid_t pid = fork();
-  
-  if (pid < 0) { fprintf(stderr, "Fork() failed\n"); }  // send to stderr
-  else if (pid == 0) { // child
-    int ret = 0;
-    if ((ret = execvp(shell_argv[0], shell_argv)) < 0) {  // can do it arg by arg, ending in NULL
-      exit(1);
+    int shell_argc = parse(input, shell_argv);
+
+    if (shell_argc < 0) { // Check if it's a pipe
+        int pipe_argc = -shell_argc;
+        char* pipe_argv[MAX_CMD_LINE_ARGS];
+        memset(pipe_argv, 0, MAX_CMD_LINE_ARGS * sizeof(char));
+
+        // Create a pipe to connect the two processes
+        int pipe_fds[2];
+        if (pipe(pipe_fds) == -1) {
+            perror("Pipe creation failed");
+            exit(1);
+        }
+
+        // Fork the process to create two child processes for the pipe
+        pid_t pid1 = fork();
+
+        if (pid1 < 0) {
+            perror("Fork() failed");
+            exit(1);
+        } else if (pid1 == 0) { // First child (left side of the pipe)
+            close(pipe_fds[0]); // Close the read end of the pipe
+            dup2(pipe_fds[1], STDOUT_FILENO); // Redirect standard output to the write end of the pipe
+            close(pipe_fds[1]); // Close the write end of the pipe
+
+            int ret = execvp(shell_argv[0], shell_argv);
+            if (ret < 0) {
+                perror("Exec failed");
+                exit(1);
+            }
+        } else { // Parent
+            pid_t pid2 = fork();
+
+            if (pid2 < 0) {
+                perror("Fork() failed");
+                exit(1);
+            } else if (pid2 == 0) { // Second child (right side of the pipe)
+                close(pipe_fds[1]); // Close the write end of the pipe
+                dup2(pipe_fds[0], STDIN_FILENO); // Redirect standard input to the read end of the pipe
+                close(pipe_fds[0]); // Close the read end of the pipe
+
+                // Execute the second part of the command
+                int ret = execvp(shell_argv[pipe_argc + 1], shell_argv + pipe_argc + 1);
+                if (ret < 0) {
+                    perror("Exec failed");
+                    exit(1);
+                }
+            } else { // Parent
+                close(pipe_fds[0]); // Close both ends of the pipe in the parent
+                close(pipe_fds[1]);
+
+                int status1, status2;
+                waitpid(pid1, &status1, 0);
+                waitpid(pid2, &status2, 0);
+            }
+        }
+    } else { // Not a pipe, execute a single command
+        int status = 0;
+        pid_t pid = fork();
+
+        if (pid < 0) {
+            fprintf(stderr, "Fork() failed\n");
+        } else if (pid == 0) { // Child
+            int ret = execvp(shell_argv[0], shell_argv);
+            if (ret < 0) {
+                perror("Exec failed");
+                exit(1);
+            }
+        } else { // Parent
+            while (wait(&status) != pid) { }
+        }
     }
-    exit(0);
-  }
-  else { // parent -----  don't wait if you are creating a daemon (background) process
-    while (wait(&status) != pid) { }
-  }
 
-
-return 0;
+    return 0;
 }
 
 int main(int argc, const char * argv[]) {
