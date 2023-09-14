@@ -17,61 +17,67 @@ int history_index = 0;
 
 int min(int a, int b) { return a < b ? a : b; }
 
-void redirect_input(const char* filename) { 
-    int fd = open (filename, O_RDONLY);
-    if (fd == -1) {  
+void redirect_input(const char* filename) {
+    int fd = open(filename, O_RDONLY);
+    if (fd == -1) {
         perror("open filename in redirect_input failed");
         exit(-1);
     }
-    dup2(fd, STDIN_FILENO);
+    dup2(fd, STDIN_FILENO); // Redirect standard input to the file descriptor fd
+    close(fd); // Close the file descriptor as it's no longer needed
 }
 
-void redirect_output(const char* filename, bool append) { 
+void redirect_output(const char* filename, bool append) {
     int flags = O_WRONLY;
     flags |= append ? O_APPEND : O_CREAT;
 
-    int fd = open (filename, flags);
-    if (fd == -1) { 
+    int fd = open(filename, flags, 0666); // You can adjust file permissions as needed
+    if (fd == -1) {
         perror("open failure in redirect_output");
         exit(-2);
     }
-    dup2(fd, STDOUT_FILENO);
+    dup2(fd, STDOUT_FILENO); // Redirect standard output to the file descriptor fd
+    close(fd); // Close the file descriptor as it's no longer needed
 }
+
 // break a string into its tokens, putting a \0 between each token
 //   save the beginning of each string in a string of char *'s (ptrs to chars)
 
 int parse(char* p, char* argv[]) {
-  char* filename;
-  char in_or_out;
-  bool append = false;
-  int argc = 0;
+    char* filename;
+    char in_or_out;
+    bool append = false;
+    int argc = 0;
 
-  while (*p != '\0') { 
-      while (*p != '\0' && isspace(*p)) { 
-          *p++ = '\0';
-      }
-      if (*p == '<' || *p == '>') { 
-          in_or_out = *p++;
-          if (*p == '>') {++p; append = true; }   // >> means append to file
-          while (*p != '\0' && isspace(*p)) {
-              ++p;
-          }
-          filename = p;
-          while (*p != '\0' && !isspace(*p)) { 
-              ++p;
-          }
-          *p++ = '\0';
-          in_or_out == '<' ? redirect_input(filename) : redirect_output(filename, append);
-          continue; 
-      }
-      *argv++ = p;
-      ++argc;
-      while (*p != '\0' && !isspace(*p)) { 
-        ++p; 
-      }
-  }
-  *argv = NULL;
-  return argc;
+    while (*p != '\0') {
+        while (*p != '\0' && isspace(*p)) {
+            *p++ = '\0';
+        }
+        if (*p == '<' || *p == '>') {
+            in_or_out = *p++;
+            if (*p == '>') {
+                ++p;
+                append = true; // >> means append to file
+            }
+            while (*p != '\0' && isspace(*p)) {
+                ++p;
+            }
+            filename = p;
+            while (*p != '\0' && !isspace(*p)) {
+                ++p;
+            }
+            *p++ = '\0';
+            in_or_out == '<' ? redirect_input(filename) : redirect_output(filename, append);
+            continue;
+        }
+        *argv++ = p;
+        ++argc;
+        while (*p != '\0' && !isspace(*p)) {
+            ++p;
+        }
+    }
+    *argv = NULL;
+    return argc;
 }
 
 
